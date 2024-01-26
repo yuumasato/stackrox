@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	extscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	cached "k8s.io/client-go/discovery/cached"
@@ -326,6 +327,31 @@ func TestComplianceV2ComplianceObjectLabels(t *testing.T){
 
     assert.Contains(t, scanSetting.Labels, "app.kubernetes.io/name")
     assert.Equal(t, scanSetting.Labels["app.kubernetes.io/name"], "stackrox")
+
+    // Create a ScanSetting via CO
+    scanSettingName := fmt.Sprintf("%s-CO", testName)
+	scanSettingCO := &complianceoperatorv1.ScanSetting{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      scanSettingName,
+			Namespace: "openshift-compliance",
+		},
+		ComplianceSuiteSettings: complianceoperatorv1.ComplianceSuiteSettings{
+			AutoApplyRemediations: false,
+			Schedule:              "0 1 * * *",
+			Suspend:               false,
+		},
+		Roles: []string{"master", "worker"},
+	}
+	err = client.Create(context.TODO(), scanSettingCO, nil);
+    require.NoError(t, err, "failed to get create CO ScanSetting %s", scanSettingName)
+
+    var scanSettingCreated complianceoperatorv1.ScanSetting
+    err = client.Get(context.TODO(), types.NamespacedName{Name: scanSettingName, Namespace: "openshift-compliance"}, &scanSettingCreated)
+    require.NoError(t, err, "failed to get ScanSetting %s", scanSettingName)
+
+    assert.NotContains(t, scanSettingCreated.Labels, "app.kubernetes.io/name")
+
+
 }
 
 func deleteScanConfig(ctx context.Context, scanID string, service v2.ComplianceScanConfigurationServiceClient) error {
