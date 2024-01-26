@@ -278,6 +278,56 @@ func TestComplianceV2DeleteComplianceScanConfigurations(t *testing.T) {
 	assert.Empty(t, scanconfigID)
 }
 
+func TestComplianceV2ComplianceObjectLabels(t *testing.T){
+	ctx := context.Background()
+	conn := centralgrpc.GRPCConnectionToCentral(t)
+	service := v2.NewComplianceScanConfigurationServiceClient(conn)
+	serviceCluster := v1.NewClustersServiceClient(conn)
+	clusters, err := serviceCluster.GetClusters(ctx, &v1.GetClustersRequest{})
+	assert.NoError(t, err)
+	clusterID := clusters.GetClusters()[0].GetId()
+	testName := fmt.Sprintf("test-%s", uuid.NewV4().String())
+	req := &v2.ComplianceScanConfiguration{
+		ScanName: testName,
+		Id:       "",
+		Clusters: []string{clusterID},
+		ScanConfig: &v2.BaseComplianceScanConfigurationSettings{
+			OneTimeScan: false,
+			Profiles:    []string{"rhcos4-moderate-rev-4"},
+			Description: "test config",
+			ScanSchedule: &v2.Schedule{
+				IntervalType: 1,
+				Hour:         15,
+				Minute:       0,
+				Interval: &v2.Schedule_DaysOfWeek_{
+					DaysOfWeek: &v2.Schedule_DaysOfWeek{
+						Days: []int32{1, 2, 3, 4, 5, 6},
+					},
+				},
+			},
+		},
+	}
+
+	resp, err := service.CreateComplianceScanConfiguration(ctx, req)
+	assert.NoError(t, err)
+	assert.Equal(t, req.GetScanName(), resp.GetScanName())
+
+	query := &v2.RawQuery{Query: ""}
+    scanConfigs, err := service.ListComplianceScanConfigurations(ctx, query)
+	configs := scanConfigs.GetConfigurations()
+	scanconfigID := getscanConfigID(testName, configs)
+	defer deleteScanConfig(ctx, scanconfigID, service)
+
+	client := createDynamicClient(t)
+	// Ensure the ScanSetting binding has the lables
+	var scanSetting complianceoperatorv1.ScanSetting
+    err = client.Get(context.TODO(), types.NamespacedName{Name: testName, Namespace: "openshift-compliance"}, &scanSetting)
+    require.NoError(t, err, "failed to get ScanSetting %s", testName)
+
+    assert.Contains(t, scanSetting.Labels, "app.kubernetes.io/name")
+    assert.Equal(t, scanSetting.Labels["app.kubernetes.io/name"], "stackrox")
+}
+
 func deleteScanConfig(ctx context.Context, scanID string, service v2.ComplianceScanConfigurationServiceClient) error {
 	req := &v2.ResourceByID{
 		Id: scanID,
